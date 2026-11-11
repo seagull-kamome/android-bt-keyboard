@@ -2,8 +2,8 @@ build/
 .gradle/
 local.properties
 *.apk
-.gradle-home/
-.android-home/
+.gradle-home
+.android-home
 serve/
 .tmp/
 .deploy.log

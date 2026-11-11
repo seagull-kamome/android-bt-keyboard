@@ -63,6 +63,7 @@ class MainActivity : ComponentActivity() {
         var connected by remember { mutableStateOf(false) }
         var inputScreen by remember { mutableStateOf(false) }
         var target by remember { mutableStateOf("jis") }
+        var lastLayoutId by remember { mutableStateOf("jis") }   // トラックパッドの直前に使っていたレイアウト
         var input by remember { mutableStateOf<InputState?>(null) }
         var devices by remember { mutableStateOf(emptyList<BluetoothDevice>()) }
         val log = remember { mutableStateListOf<String>() }
@@ -125,13 +126,22 @@ class MainActivity : ComponentActivity() {
         if (editor) {
             LayoutEditorScreen(layouts, saveLayouts, onClose = { editor = false })
         } else if (inputScreen && inState != null) {
-            // 削除されたレイアウトへの切替キーは何もしない
+            // 削除されたレイアウトへの切替キーは何もしない。トラックパッドへ移るときは、直前のレイアウトを覚えておく
             val onSwitch: (String) -> Unit = { t ->
                 if (t == "setup") inputScreen = false
-                else if (t == "trackpad" || layouts.any { it.id == t }) target = t
+                else if (t == "trackpad" || layouts.any { it.id == t }) {
+                    if (t == "trackpad" && target != "trackpad") lastLayoutId = target
+                    target = t
+                }
             }
-            if (target == "trackpad") TrackpadScreen(controller!!, onSwitch, padLeft, { setPadLeft(!padLeft) })
-            else KeyboardScreen(layouts.firstOrNull { it.id == target } ?: layouts.first(), inState, onSwitch, padLeft)
+            // 見た目（背景画像・キーの透明度・文字色）は、表示中のレイアウトのもの。
+            // トラックパッドはレイアウトではないので、直前に使っていたレイアウトの見た目を引き継ぐ
+            val styleId = if (target == "trackpad") lastLayoutId else target
+            val styled = layouts.firstOrNull { it.id == styleId } ?: layouts.first()
+            AppearanceBackground(styled.id, styled.style, bgVersion = 0) {
+                if (target == "trackpad") TrackpadScreen(controller!!, onSwitch, padLeft, { setPadLeft(!padLeft) })
+                else KeyboardScreen(layouts.firstOrNull { it.id == target } ?: layouts.first(), inState, onSwitch, padLeft)
+            }
         } else {
             SetupScreen(
                 state, connected, devices, log,
