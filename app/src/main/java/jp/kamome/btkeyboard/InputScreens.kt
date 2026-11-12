@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,7 +29,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.unit.dp
@@ -68,7 +69,8 @@ fun KeyboardScreen(layout: KeyboardLayout, input: InputState, onSwitch: (String)
     val onHold: (Boolean) -> Unit = { down -> holds = (holds + if (down) 1 else -1).coerceAtLeast(0) }
     Box(Modifier.fillMaxSize()) {
         Column(
-            Modifier.fillMaxSize().padding(horizontal = 3.dp, vertical = 6.dp),
+            // 押す間切替の間は見えなくする（描画の透明度を 0 にしても、押している指のタッチはキーに届き続ける）
+            Modifier.fillMaxSize().alpha(if (holds > 0) 0f else 1f).padding(horizontal = 3.dp, vertical = 6.dp),
             verticalArrangement = Arrangement.spacedBy(3.dp),
         ) {
             layout.rows.forEach { row ->
@@ -78,9 +80,12 @@ fun KeyboardScreen(layout: KeyboardLayout, input: InputState, onSwitch: (String)
             }
         }
         // キーを押している指のタッチは、キーが画面に残っている限りそのキーに届き続ける。
-        // 別の指の新しいタッチは、この上に重ねたトラックパッドが受け取る
+        // 別の指の新しいタッチは、この上に重ねたトラックパッドが受け取る。
+        // 外側の Box は、パッドやボタンの外側のタッチが、見えなくなったキーに届かないように受け止める
         if (holds > 0) {
-            Surface(Modifier.fillMaxSize()) { TrackpadScreen(input.hid, {}, padButtonsLeft, {}, overlay = true) }
+            Box(Modifier.fillMaxSize().pointerInput(Unit) { awaitPointerEventScope { while (true) awaitPointerEvent() } }) {
+                TrackpadScreen(input.hid, {}, padButtonsLeft, {}, overlay = true)
+            }
         }
     }
 }
@@ -93,9 +98,10 @@ private fun KeyButton(k: KeyDef, input: InputState, onSwitch: (String) -> Unit, 
     val colors = MaterialTheme.colorScheme
     val bg = when {
         pressed || latched -> colors.primary
-        k.kind == KeyKind.KEY -> colors.surfaceVariant
-        else -> colors.secondaryContainer
+        k.kind == KeyKind.KEY -> colors.surfaceVariant.withKeyAlpha()
+        else -> colors.secondaryContainer.withKeyAlpha()
     }
+    val textColor = labelColor(pressed || latched, colors.onSurface, colors.onPrimary)
     Box(
         modifier
             .clip(RoundedCornerShape(6.dp))
@@ -118,7 +124,7 @@ private fun KeyButton(k: KeyDef, input: InputState, onSwitch: (String) -> Unit, 
     ) {
         Text(
             k.label, fontSize = when (k.label.length) { 1 -> 15.sp; 2 -> 13.sp; 3 -> 11.sp; else -> 9.sp },
-            color = if (pressed || latched) colors.onPrimary else colors.onSurface,
+            color = textColor, style = keyTextStyle(textColor),
             maxLines = 1, softWrap = false,
         )
     }
@@ -138,10 +144,13 @@ fun TrackpadScreen(
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val pad: @Composable (Modifier) -> Unit = { m ->
         Box(
-            m.clip(RoundedCornerShape(12.dp)).background(colors.surfaceVariant)
+            m.clip(RoundedCornerShape(12.dp)).background(colors.surfaceVariant.withKeyAlpha())
                 .pointerInput(Unit) { trackpadGestures(hid) },
             contentAlignment = Alignment.Center,
-        ) { Text(if (overlay) "トラックパッド（キーを離すと戻ります）" else "トラックパッド", color = colors.onSurfaceVariant) }
+        ) {
+            val c = keyTextColor(colors.onSurfaceVariant)
+            Text(if (overlay) "トラックパッド（キーを離すと戻ります）" else "トラックパッド", color = c, style = keyTextStyle(c))
+        }
     }
     if (landscape) {
         // 横向き: パッドと、クリックボタン・切替ボタンの列を横に並べる
@@ -227,7 +236,7 @@ private fun MouseButton(label: String, mask: Int, hid: HidController, modifier: 
     val colors = MaterialTheme.colorScheme
     Box(
         modifier.clip(RoundedCornerShape(10.dp))
-            .background(if (pressed) colors.primary else colors.secondaryContainer)
+            .background(if (pressed) colors.primary else colors.secondaryContainer.withKeyAlpha())
             .pointerInput(mask) {
                 detectTapGestures(onPress = {
                     pressed = true
@@ -238,25 +247,39 @@ private fun MouseButton(label: String, mask: Int, hid: HidController, modifier: 
                 })
             },
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = if (pressed) colors.onPrimary else colors.onSurface) }
+    ) {
+        val c = labelColor(pressed, colors.onSurface, colors.onPrimary)
+        Text(label, color = c, style = keyTextStyle(c))
+    }
 }
 
 @Composable
 private fun SwitchButton(label: String, target: String, onSwitch: (String) -> Unit, modifier: Modifier) {
     val colors = MaterialTheme.colorScheme
     Box(
-        modifier.clip(RoundedCornerShape(10.dp)).background(colors.tertiaryContainer)
+        modifier.clip(RoundedCornerShape(10.dp)).background(colors.tertiaryContainer.withKeyAlpha())
             .pointerInput(target) { detectTapGestures(onTap = { onSwitch(target) }) },
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = colors.onTertiaryContainer, fontSize = 13.sp) }
+    ) {
+        val c = keyTextColor(colors.onTertiaryContainer)
+        Text(label, color = c, style = keyTextStyle(c), fontSize = 13.sp)
+    }
 }
 
 @Composable
 private fun ActionButton(label: String, onClick: () -> Unit, modifier: Modifier) {
     val colors = MaterialTheme.colorScheme
     Box(
-        modifier.clip(RoundedCornerShape(10.dp)).background(colors.secondaryContainer)
+        modifier.clip(RoundedCornerShape(10.dp)).background(colors.secondaryContainer.withKeyAlpha())
             .pointerInput(onClick) { detectTapGestures(onTap = { onClick() }) },
         contentAlignment = Alignment.Center,
-    ) { Text(label, color = colors.onSecondaryContainer, fontSize = 12.sp) }
+    ) {
+        val c = keyTextColor(colors.onSecondaryContainer)
+        Text(label, color = c, style = keyTextStyle(c), fontSize = 12.sp)
+    }
 }
+
+/** 押している間は、指定された文字色（なければ onPressed）。そうでなければ、見た目の設定に従った文字色 */
+@Composable
+private fun labelColor(pressed: Boolean, normal: Color, onPressed: Color): Color =
+    if (pressed) (LocalKeyStyle.current.textColor ?: onPressed) else keyTextColor(normal)

@@ -22,7 +22,33 @@ data class KeyDef(
     val target: String = "",
 )
 
-data class KeyboardLayout(val id: String, val name: String, val rows: List<List<KeyDef>>)
+/**
+ * レイアウトごとの見た目。背景画像そのものは JSON に入れられないので、アプリ内のファイル（BackgroundStore）に置き、
+ * ここには、暗さ・キーの不透明度・文字色の数値だけを持つ（JSON のコピーと貼り付けで一緒に運ばれる）
+ */
+data class LayoutStyle(
+    val dim: Int = 35,           // 背景画像を暗くする割合（0〜70 %）
+    val keyAlpha: Int = 100,     // キーの不透明度（10〜100 %）
+    val textColor: Int? = null,  // 文字色（ARGB）。null なら既定（背景画像があれば白）
+)
+
+data class KeyboardLayout(
+    val id: String, val name: String, val rows: List<List<KeyDef>>,
+    val style: LayoutStyle = LayoutStyle(),
+)
+
+fun LayoutStyle.toJson(): JSONObject = JSONObject().put("dim", dim).put("keyAlpha", keyAlpha)
+    .apply { textColor?.let { put("textColor", it) } }
+
+fun JSONObject?.toStyle(): LayoutStyle {
+    if (this == null) return LayoutStyle()
+    val d = LayoutStyle()
+    return LayoutStyle(
+        optInt("dim", d.dim).coerceIn(0, 70),
+        optInt("keyAlpha", d.keyAlpha).coerceIn(10, 100),
+        if (has("textColor")) getInt("textColor") else null,
+    )
+}
 
 fun KeyDef.toJson(): JSONObject = JSONObject()
     .put("label", label).put("kind", kind.name).put("value", value)
@@ -36,13 +62,14 @@ fun JSONObject.toKeyDef() = KeyDef(
 fun KeyboardLayout.toJson(): JSONObject = JSONObject()
     .put("id", id).put("name", name)
     .put("rows", JSONArray(rows.map { row -> JSONArray(row.map { it.toJson() }) }))
+    .put("style", style.toJson())
 
 fun JSONObject.toLayout(): KeyboardLayout {
     val rows = getJSONArray("rows")
     return KeyboardLayout(getString("id"), getString("name"), List(rows.length()) { r ->
         val row = rows.getJSONArray(r)
         List(row.length()) { row.getJSONObject(it).toKeyDef() }
-    })
+    }, optJSONObject("style").toStyle())
 }
 
 /** レイアウトの保存先。ファイルが無い、または読めないときは既定のプリセットを返す */
