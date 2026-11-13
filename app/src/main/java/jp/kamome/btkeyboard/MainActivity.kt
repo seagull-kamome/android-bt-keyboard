@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -41,18 +42,36 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import jp.kamome.btkeyboard.video.LocalVideo
+import jp.kamome.btkeyboard.video.QrCode
+import jp.kamome.btkeyboard.video.VideoReceiver
 
 /** 画面は「接続設定」と「入力（キーボード / メディア / トラックパッド）」の 2 系統 */
 @SuppressLint("MissingPermission")
 class MainActivity : ComponentActivity() {
     private var controller: HidController? = null
+    // 映像の受信（任意機能）。オフのままなら、何も起動しない
+    private val video by lazy { VideoReceiver(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-                Surface(Modifier.fillMaxSize()) { App() }
+                // 映像を背景に出している間は、土台の面を透明にして、映像が見えるようにする（各画面が自前で面を敷く）
+                CompositionLocalProvider(LocalVideo provides video) {
+                    Surface(Modifier.fillMaxSize(), color = if (video.active) Color.Transparent else MaterialTheme.colorScheme.surface) { App() }
+                }
             }
         }
     }
@@ -75,6 +94,13 @@ class MainActivity : ComponentActivity() {
         // トラックパッドのクリックボタン列を左に置くか（左手でキーを押し、右手でパッドを使う人向けなど）
         var padLeft by remember { mutableStateOf(prefs.getBoolean("pad_buttons_left", false)) }
         val setPadLeft: (Boolean) -> Unit = { padLeft = it; prefs.edit().putBoolean("pad_buttons_left", it).apply() }
+        // 映像の受信（Chrome の画面共有を背景に出す）。既定はオフで、キーボードだけの使い方はそのまま
+        var videoEnabled by remember { mutableStateOf(prefs.getBoolean("video_receive", false)) }
+        var videoFailed by remember { mutableStateOf(false) }
+        LaunchedEffect(videoEnabled) {
+            if (videoEnabled) videoFailed = !video.start() else { video.stop(); videoFailed = false }
+        }
+        var keysVisible by remember { mutableStateOf(true) }   // 映像を見ている間だけ、キーを隠せる
 
         // HID の登録は 1 アプリにつき 1 回だけ。2 回目以降は registerApp が失敗する
         val start = start@{
@@ -124,7 +150,7 @@ class MainActivity : ComponentActivity() {
         }
         BackHandler(enabled = inputScreen || editor) { if (editor) editor = false else inputScreen = false }
         if (editor) {
-            LayoutEditorScreen(layouts, saveLayouts, onClose = { editor = false })
+            Surface(Modifier.fillMaxSize()) { LayoutEditorScreen(layouts, saveLayouts, onClose = { editor = false }) }
         } else if (inputScreen && inState != null) {
             // 削除されたレイアウトへの切替キーは何もしない。トラックパッドへ移るときは、直前のレイアウトを覚えておく
             val onSwitch: (String) -> Unit = { t ->
@@ -139,11 +165,26 @@ class MainActivity : ComponentActivity() {
             val styleId = if (target == "trackpad") lastLayoutId else target
             val styled = layouts.firstOrNull { it.id == styleId } ?: layouts.first()
             AppearanceBackground(styled.id, styled.style, bgVersion = 0) {
-                if (target == "trackpad") TrackpadScreen(controller!!, onSwitch, padLeft, { setPadLeft(!padLeft) })
-                else KeyboardScreen(layouts.firstOrNull { it.id == target } ?: layouts.first(), inState, onSwitch, padLeft)
+                val showKeys = keysVisible || !video.active
+                Column(Modifier.fillMaxSize()) {
+                    // 映像を見ている間は、キーに被らないよう、上に細い帯を設けて、切り替えボタンを置く
+                    if (video.active) {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) {
+                            Text(if (showKeys) "⌨ 隠す" else "⌨ キーを出す", color = Color.White,
+                                modifier = Modifier.background(Color.Black.copy(alpha = 0.45f)).clickable { keysVisible = !keysVisible }
+                                    .padding(horizontal = 10.dp, vertical = 2.dp))
+                        }
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (showKeys) {
+                            if (target == "trackpad") TrackpadScreen(controller!!, onSwitch, padLeft, { setPadLeft(!padLeft) })
+                            else KeyboardScreen(layouts.firstOrNull { it.id == target } ?: layouts.first(), inState, onSwitch, padLeft)
+                        }
+                    }
+                }
             }
         } else {
-            SetupScreen(
+            Surface(Modifier.fillMaxSize()) { SetupScreen(
                 state, connected, devices, log,
                 onStart = begin,
                 onResetBluetooth = resetBluetooth,
@@ -154,7 +195,9 @@ class MainActivity : ComponentActivity() {
                 forceLandscape = forceLandscape,
                 padLeft = padLeft, onPadLeft = setPadLeft,
                 onForceLandscape = { forceLandscape = it; prefs.edit().putBoolean("force_landscape", it).apply() },
-            )
+                videoEnabled = videoEnabled, videoFailed = videoFailed,
+                onVideoEnabled = { videoEnabled = it; prefs.edit().putBoolean("video_receive", it).apply() },
+            ) }
         }
     }
 
@@ -164,6 +207,7 @@ class MainActivity : ComponentActivity() {
         onStart: () -> Unit, onResetBluetooth: () -> Unit, onRefresh: () -> Unit, onConnect: (BluetoothDevice) -> Unit, onOpenInput: () -> Unit,
         onOpenEditor: () -> Unit, forceLandscape: Boolean, onForceLandscape: (Boolean) -> Unit,
         padLeft: Boolean, onPadLeft: (Boolean) -> Unit,
+        videoEnabled: Boolean, videoFailed: Boolean, onVideoEnabled: (Boolean) -> Unit,
     ) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -191,12 +235,51 @@ class MainActivity : ComponentActivity() {
                 Switch(checked = padLeft, onCheckedChange = onPadLeft)
                 Text("トラックパッドのクリックボタンを左側に置く")
             }
+            VideoSection(videoEnabled, videoFailed, onVideoEnabled)
             Text("ログ（新しい順）:")
             log.forEach { Text(it, style = MaterialTheme.typography.bodySmall) }
         }
     }
 
+    /** 映像の受信の設定。オフなら、スイッチだけ（キーボード単体の使い方には、影響しない） */
+    @androidx.compose.runtime.Composable
+    private fun VideoSection(enabled: Boolean, failed: Boolean, onEnabled: (Boolean) -> Unit) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Switch(checked = enabled, onCheckedChange = onEnabled)
+            Text("映像を受信して、背景に表示（Chrome の画面共有。使わないときはオフ）")
+        }
+        if (!enabled) return
+        if (failed) { Text("受信サーバーを開始できません（ポート 8080〜8082 が使用中）"); return }
+        LaunchedEffect(Unit) { video.refreshAddress() }
+        val host = video.hostPort
+        if (host == null) {
+            Text("Wi-Fi に接続してください（接続先を表示できません）")
+            Button(onClick = { video.refreshAddress() }) { Text("接続先を更新") }
+            return
+        }
+        Text("映像中のキーの不透明度: ${video.keyAlpha}%（小さいほど、映像が透けます）")
+        Slider(value = video.keyAlpha.toFloat(), onValueChange = { video.changeKeyAlpha(it.toInt()) }, valueRange = 0f..100f)
+        Text("端末: ${video.deviceName}　PIN: ${video.pin}")
+        Text("Chrome のアドレス欄に http://$host/ を入れて開く（初回は、拡張機能の導入が必要）")
+        Text(when {
+            video.active && video.hasFrame -> "受信中（${video.streamWidth}x${video.streamHeight}）。入力画面で、背景に映像が出ます"
+            video.active -> "接続済み。映像を待っています"
+            else -> "送信側の接続を待っています"
+        })
+        val qr = remember(host) { QrCode.bitmap("http://$host/", 360).asImageBitmap() }
+        Image(qr, contentDescription = "接続先の QR コード", modifier = Modifier.size(160.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { video.shareAddress(this@MainActivity) }) { Text("接続先を共有") }
+            Button(onClick = { video.shareExtension(this@MainActivity) }) { Text("拡張機能を共有") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { video.refreshAddress() }) { Text("接続先を更新") }
+            Button(onClick = { video.regeneratePin() }) { Text("PIN を作り直す") }
+        }
+    }
+
     override fun onDestroy() {
+        video.stop()
         stopService(Intent(this, KeepAliveService::class.java))
         controller?.stop()
         super.onDestroy()

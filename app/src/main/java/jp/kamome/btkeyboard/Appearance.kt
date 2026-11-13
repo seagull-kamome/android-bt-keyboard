@@ -18,6 +18,8 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
+import jp.kamome.btkeyboard.video.LocalVideo
+import jp.kamome.btkeyboard.video.VideoLayer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -40,9 +42,16 @@ fun AppearanceBackground(layoutId: String, style: LayoutStyle, bgVersion: Int, c
     val image by produceState<ImageBitmap?>(null, layoutId, bgVersion) {
         value = withContext(Dispatchers.IO) { BackgroundStore.load(ctx, layoutId) }
     }
-    val keyStyle = KeyStyle(style.keyAlpha / 100f, style.textColor?.let { Color(it) }, image != null)
+    // 映像を受信中なら、背景画像の代わりに映像を敷く（映像がなければ、従来どおり）
+    val video = LocalVideo.current?.takeIf { it.active }
+    val keyPercent = if (video != null) minOf(style.keyAlpha, video.keyAlpha) else style.keyAlpha
+    val keyStyle = KeyStyle(keyPercent / 100f,style.textColor?.let { Color(it) }, image != null || video != null)
     Box(Modifier.fillMaxSize()) {
-        image?.let {
+        if (video != null) {
+            Box(Modifier.fillMaxSize().background(Color.Black))
+            VideoLayer(video)
+            if (style.dim > 0) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = style.dim / 100f)))
+        } else image?.let {
             Image(it, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
             if (style.dim > 0) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = style.dim / 100f)))
         }
