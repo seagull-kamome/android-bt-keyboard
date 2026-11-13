@@ -20,6 +20,7 @@ import java.net.NetworkInterface
  */
 class VideoReceiver(private val context: Context) : StreamServer.Listener {
     private val main = Handler(Looper.getMainLooper())
+    private val settings = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val identity = DeviceIdentity(context)
     private val extensionId: String by lazy { ExtensionInfo.id(context) }
 
@@ -42,6 +43,15 @@ class VideoReceiver(private val context: Context) : StreamServer.Listener {
     var pin by mutableStateOf(identity.pin)
         private set
     val deviceName: String get() = identity.name
+
+    /** 映像を背景に出している間の、キーの不透明度（%）。レイアウトごとの設定と比べて、小さいほうを使う */
+    var keyAlpha by mutableIntStateOf(settings.getInt(KEY_ALPHA, DEFAULT_KEY_ALPHA))
+        private set
+
+    fun changeKeyAlpha(percent: Int) {
+        keyAlpha = percent.coerceIn(0, 100)
+        settings.edit().putInt(KEY_ALPHA, keyAlpha).apply()
+    }
 
     /** 背景に映像を出すか（送信側が接続して、映像の大きさが分かっているとき） */
     val active: Boolean get() = running && senderConnected && streamWidth > 0 && streamHeight > 0
@@ -181,6 +191,8 @@ class VideoReceiver(private val context: Context) : StreamServer.Listener {
 
     private companion object {
         const val TAG = "BTKB-video"
+        const val KEY_ALPHA = "video_key_alpha"
+        const val DEFAULT_KEY_ALPHA = 35
         val PORTS = listOf(8080, 8081, 8082)
     }
 }

@@ -27,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.darkColorScheme
@@ -45,6 +46,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -164,16 +166,20 @@ class MainActivity : ComponentActivity() {
             val styled = layouts.firstOrNull { it.id == styleId } ?: layouts.first()
             AppearanceBackground(styled.id, styled.style, bgVersion = 0) {
                 val showKeys = keysVisible || !video.active
-                Box(Modifier.fillMaxSize()) {
-                    if (showKeys) {
-                        if (target == "trackpad") TrackpadScreen(controller!!, onSwitch, padLeft, { setPadLeft(!padLeft) })
-                        else KeyboardScreen(layouts.firstOrNull { it.id == target } ?: layouts.first(), inState, onSwitch, padLeft)
-                    }
+                Column(Modifier.fillMaxSize()) {
+                    // 映像を見ている間は、キーに被らないよう、上に細い帯を設けて、切り替えボタンを置く
                     if (video.active) {
-                        Text(if (showKeys) "⌨ 隠す" else "⌨ キーを出す", color = Color.White,
-                            modifier = Modifier.align(Alignment.TopEnd).padding(4.dp)
-                                .background(Color.Black.copy(alpha = 0.45f)).clickable { keysVisible = !keysVisible }
-                                .padding(horizontal = 10.dp, vertical = 6.dp))
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp), horizontalArrangement = Arrangement.End) {
+                            Text(if (showKeys) "⌨ 隠す" else "⌨ キーを出す", color = Color.White,
+                                modifier = Modifier.background(Color.Black.copy(alpha = 0.45f)).clickable { keysVisible = !keysVisible }
+                                    .padding(horizontal = 10.dp, vertical = 2.dp))
+                        }
+                    }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        if (showKeys) {
+                            if (target == "trackpad") TrackpadScreen(controller!!, onSwitch, padLeft, { setPadLeft(!padLeft) })
+                            else KeyboardScreen(layouts.firstOrNull { it.id == target } ?: layouts.first(), inState, onSwitch, padLeft)
+                        }
                     }
                 }
             }
@@ -251,6 +257,8 @@ class MainActivity : ComponentActivity() {
             Button(onClick = { video.refreshAddress() }) { Text("接続先を更新") }
             return
         }
+        Text("映像中のキーの不透明度: ${video.keyAlpha}%（小さいほど、映像が透けます）")
+        Slider(value = video.keyAlpha.toFloat(), onValueChange = { video.changeKeyAlpha(it.toInt()) }, valueRange = 0f..100f)
         Text("端末: ${video.deviceName}　PIN: ${video.pin}")
         Text("Chrome のアドレス欄に http://$host/ を入れて開く（初回は、拡張機能の導入が必要）")
         Text(when {

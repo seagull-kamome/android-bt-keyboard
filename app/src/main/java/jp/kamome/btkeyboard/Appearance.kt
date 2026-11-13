@@ -44,7 +44,8 @@ fun AppearanceBackground(layoutId: String, style: LayoutStyle, bgVersion: Int, c
     }
     // 映像を受信中なら、背景画像の代わりに映像を敷く（映像がなければ、従来どおり）
     val video = LocalVideo.current?.takeIf { it.active }
-    val keyStyle = KeyStyle(style.keyAlpha / 100f, style.textColor?.let { Color(it) }, image != null || video != null)
+    val keyPercent = if (video != null) minOf(style.keyAlpha, video.keyAlpha) else style.keyAlpha
+    val keyStyle = KeyStyle(keyPercent / 100f,style.textColor?.let { Color(it) }, image != null || video != null)
     Box(Modifier.fillMaxSize()) {
         if (video != null) {
             Box(Modifier.fillMaxSize().background(Color.Black))
