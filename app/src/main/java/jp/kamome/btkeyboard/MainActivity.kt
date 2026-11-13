@@ -7,6 +7,7 @@ import android.bluetooth.BluetoothDevice
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
@@ -62,6 +63,10 @@ class MainActivity : ComponentActivity() {
     private var controller: HidController? = null
     // 映像の受信（任意機能）。オフのままなら、何も起動しない
     private val video by lazy { VideoReceiver(this) }
+
+    /** Bluetooth の接続権限があるか。Android 11 以前は、インストール時に付与されるので、常に true */
+    private fun canUseBluetooth() = Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
+        checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -120,7 +125,9 @@ class MainActivity : ComponentActivity() {
             devices = c.bondedDevices()
         }
         // 強制終了などで Bluetooth 側に前の登録が固まったときの回復: Bluetooth を入れ直して登録し直す
-        val resetBluetooth = {
+        val resetBluetooth = reset@{
+            // 権限がないまま Bluetooth を切り替えようとすると落ちるので、先に権限を求める（Android 12 以降）
+            if (!canUseBluetooth()) { state = "先に「HID デバイスとして開始」を押して、Bluetooth の権限を許可してください"; return@reset }
             controller?.stop(); controller = null; input = null; connected = false
             state = "Bluetooth を入れ直しています…"
             val addLog: (String) -> Unit = { Log.i("BTKB", it); log.add(0, it) }
@@ -214,7 +221,8 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text("状態: $state")
-            Text("端末名: ${BluetoothAdapter.getDefaultAdapter()?.name}")
+            // Android 12 以降は、権限を許可する前に端末名を読むと落ちる（許可を求めるボタンも、この画面にある）
+            Text("端末名: " + if (canUseBluetooth()) BluetoothAdapter.getDefaultAdapter()?.name else "（Bluetooth の権限を許可すると表示されます）")
             // いちばんよく使うボタンなので、横向きで縦に収まらなくても見える位置（先頭）に置く
             Button(onClick = onOpenInput) {
                 Text(if (connected) "入力画面へ" else "入力画面へ（未接続）")
